@@ -1,0 +1,112 @@
+// STEPS 3-4 — The internal gRPC service (compile with `make gen-proto`).
+//
+//   * every RPC has its OWN request and response message
+//   * streams carry a variable number of items (products, order items)
+//   * errors are gRPC status codes, not fields in the messages
+//   * RPCs need not map 1:1 to REST operations (8 REST operations, 6 RPCs):
+//       listProducts, getProduct      -> ReadProducts
+//       deleteProduct, deleteManyProducts -> DeleteProducts
+//       the others keep their name (createProduct -> CreateProduct, ...)
+//
+// Writes may carry the metadata `client-id` and `request-seq` (safe
+// retries); every reply carries `served-by: <node id>`.
+syntax = "proto3";
+package inventory.v1;
+option go_package = "github.com/your-team/inventory/gen/inventory/v1;inventoryv1";
+
+service Inventory {
+  // One product, a list or a prefix; results stream back sorted.
+  // NOT_FOUND only when a single_sku was asked for and it is missing.
+  rpc ReadProducts(ReadProductsRequest) returns (stream ReadProductsResponse);
+  // ALREADY_EXISTS if the sku exists.
+  rpc CreateProduct(CreateProductRequest) returns (CreateProductResponse);
+  // NOT_FOUND if missing; ABORTED if expected_version differs.
+  rpc UpdateProduct(UpdateProductRequest) returns (UpdateProductResponse);
+  // One request per product; all are deleted atomically on close, or none.
+  // NOT_FOUND if one is missing; ABORTED if its expected_version differs.
+  rpc DeleteProducts(stream DeleteProductsRequest) returns (DeleteProductsResponse);
+  // Read-modify-write: stock += add. NOT_FOUND if missing.
+  rpc AddStock(AddStockRequest) returns (AddStockResponse);
+  // Read-modify-write: one request per item; all are applied atomically on
+  // close, or none. NOT_FOUND if a product is missing; FAILED_PRECONDITION
+  // if its stock is too low.
+  rpc PlaceOrder(stream PlaceOrderRequest) returns (PlaceOrderResponse);
+}
+
+enum Consistency {
+  CONSISTENCY_UNSPECIFIED = 0;  // treated as SEQUENTIAL
+  CONSISTENCY_SEQUENTIAL = 1;
+  CONSISTENCY_LINEARIZABLE = 2;
+}
+
+message Product {
+  string sku = 1;
+  string name = 2;
+  int64 price_cents = 3;
+  int64 stock = 4;
+  int64 version = 5;            // store revision of this product's last change
+}
+
+// ---- ReadProducts ------------------------------------------------------
+message ReadProductsRequest {
+  oneof select {                // none = all products
+    string single_sku = 1;      // exactly one product
+    SkuList sku_list = 2;       // several (unknown ones are skipped)
+    string prefix = 3;          // all SKUs with this prefix
+  }
+  bool in_stock = 4;            // only products with stock > 0
+  SortOrder sort = 5;
+  int32 limit = 6;              // 0 = no limit
+  Consistency consistency = 7;
+}
+message SkuList { repeated string skus = 1; }
+message SortOrder {
+  enum Field { FIELD_SKU = 0; FIELD_NAME = 1; FIELD_PRICE_CENTS = 2; FIELD_STOCK = 3; }
+  Field field = 1;
+  bool descending = 2;          // ties are always broken by sku, ascending
+}
+message ReadProductsResponse {
+  Product product = 1;          // one message per product, in sort order
+}
+
+// ---- CreateProduct -----------------------------------------------------
+message CreateProductRequest {
+  string sku = 1;
+  string name = 2;
+  int64 price_cents = 3;
+  int64 stock = 4;              // initial stock
+}
+message CreateProductResponse { Product product = 1; }
+
+// ---- UpdateProduct -----------------------------------------------------
+message UpdateProductRequest {
+  string sku = 1;
+  optional string name = 2;     // absent = unchanged
+  optional int64 price_cents = 3;
+  optional int64 expected_version = 4;  // from If-Match
+}
+message UpdateProductResponse { Product product = 1; }
+
+// ---- DeleteProducts ----------------------------------------------------
+message DeleteProductsRequest { // one message per product
+  string sku = 1;
+  optional int64 expected_version = 2;  // from If-Match
+}
+message DeleteProductsResponse {} // success = every product was deleted
+
+// ---- AddStock ----------------------------------------------------------
+message AddStockRequest {
+  string sku = 1;
+  int64 add = 2;                // >= 1
+}
+message AddStockResponse { Product product = 1; }
+
+// ---- PlaceOrder --------------------------------------------------------
+message PlaceOrderRequest {     // one message per item
+  string sku = 1;
+  int64 quantity = 2;           // >= 1
+}
+message PlaceOrderResponse {
+  repeated Product products = 1;  // after the order, in request order
+  int64 total_cents = 2;          // sum of quantity x price_cents
+}

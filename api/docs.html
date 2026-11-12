@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!--
+  Swagger UI in a single file (view + "Try it out"; it cannot edit the spec).
+
+  * Served by the server at  http://localhost:8080/docs   (same origin: no CORS setup)
+  * Another spec:            /docs?url=http://localhost:8081/openapi.yaml
+  * Without the server:      cd api && python3 -m http.server 8000
+                             -> http://localhost:8000/docs.html   (view only)
+  Loads Swagger UI from a CDN, so the browser needs internet access.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KV Store API</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    window.onload = () => {
+      const url = new URLSearchParams(location.search).get("url") || "/openapi.yaml";
+      window.ui = SwaggerUIBundle({
+        url,
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        tryItOutEnabled: true,          // "Try it out" open by default
+        displayRequestDuration: true,
+        // supportedSubmitMethods: [],  // uncomment for a view-only page (no "Try it out")
+      });
+    };
+  </script>
+</body>
+</html>

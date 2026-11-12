@@ -1,0 +1,47 @@
+# Optional: self-hosted API tools in Docker. Without Docker, the server
+# already serves Swagger Editor at /editor and Swagger UI at /docs.
+#
+#   make tools-up      Swagger Editor  http://localhost:8090
+#                      Swagger UI      http://localhost:8091
+#                      Scalar          http://localhost:8092
+#   make tools-down
+#
+# All three read ../api/openapi.yaml. None of them writes back to the file:
+# the editor's File -> Save as YAML, then overwrite api/openapi.yaml.
+# "Try it out" / "Test Request" from these pages calls http://localhost:8080
+# cross-origin, so start the server with CORS enabled:  make run CORS='*'
+# Pin image versions for the course (e.g. scalarapi/api-reference:0.5.17).
+# Not loading?  docker compose -f docker/api-tools.compose.yaml ps
+#               docker compose -f docker/api-tools.compose.yaml logs <service>
+services:
+  swagger-editor:
+    image: swaggerapi/swagger-editor:latest
+    # The current image listens on port 80 inside the container (not 8080 as
+    # its docs say, and it ignores PORT). Mapping to 8080 drops connections.
+    ports: ["8090:80"]
+    environment:
+      SWAGGER_FILE: /spec/openapi.yaml
+    volumes: ["../api:/spec:ro"]
+
+  swagger-ui:
+    image: swaggerapi/swagger-ui:latest
+    ports: ["8091:8080"]
+    environment:
+      PORT: "8080"
+      SWAGGER_JSON: /spec/openapi.yaml
+    volumes: ["../api:/spec:ro"]
+
+  # Scalar API Reference: docs + built-in API client ("Test Request").
+  # Viewing only; to EDIT with Scalar use the Scalar API Client desktop app.
+  scalar:
+    image: scalarapi/api-reference:latest
+    ports: ["8092:8080"]
+    environment:
+      # Send "Test Request" calls straight to the server (no hosted proxy:
+      # proxy.scalar.com cannot reach your localhost).
+      API_REFERENCE_CONFIG: '{"theme": "default"}'
+    volumes:
+      # Mount only the spec: the image serves every .yaml in /docs, and
+      # api/ also holds oapi-codegen.yaml. If you replace the file and the
+      # page shows the old version, run `make tools-down tools-up`.
+      - ../api/openapi.yaml:/docs/openapi.yaml:ro

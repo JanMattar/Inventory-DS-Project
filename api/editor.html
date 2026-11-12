@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<!--
+  Swagger Editor in a single file (edit + live preview). No Docker needed.
+
+  * Served by the server at  http://localhost:8080/editor   (loads this node's /openapi.yaml)
+  * Without the server:      cd api && python3 -m http.server 8000
+                             -> http://localhost:8000/editor.html
+  * Another spec:            /editor?url=http://localhost:8081/openapi.yaml
+
+  The editor CANNOT write to api/openapi.yaml: use File -> Save as YAML and
+  overwrite the file, then `make gen-rest`. Edits are kept in the browser's
+  local storage between visits; File -> Import URL reloads the file.
+  Loads Swagger Editor from a CDN, so the browser needs internet access.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>KV Store API: editor</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-editor-dist@4/swagger-editor.css">
+  <style>
+    html, body { margin: 0; height: 100%; }
+    #swagger-editor { height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="swagger-editor"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-editor-dist@4/swagger-editor-bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-editor-dist@4/swagger-editor-standalone-preset.js"></script>
+  <script>
+    window.onload = () => {
+      const url = new URLSearchParams(location.search).get("url") || "openapi.yaml";
+      window.editor = SwaggerEditorBundle({
+        url,                          // relative: works at /editor and at /editor.html
+        dom_id: "#swagger-editor",
+        layout: "StandaloneLayout",
+        presets: [SwaggerEditorStandalonePreset],
+      });
+    };
+  </script>
+</body>
+</html>

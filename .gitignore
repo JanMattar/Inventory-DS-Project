@@ -1,0 +1,3 @@
+bin/
+# Generated code: commit it if you prefer, but always regenerate after editing the spec/.proto
+gen/

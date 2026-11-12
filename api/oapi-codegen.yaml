@@ -1,0 +1,9 @@
+# STEP 2 — oapi-codegen configuration (run with `make gen-rest`).
+# Generates models + a Go 1.22 net/http server + the "strict" interface,
+# i.e. one typed Go method per operationId that you implement.
+package: rest
+output: gen/rest/rest.gen.go
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true

@@ -1,0 +1,501 @@
+openapi: 3.0.3
+
+info:
+  title: Replicated Inventory
+  version: 1.0.0
+  description: |
+    Client-facing RESTful API of the replicated inventory.
+
+    * Reads accept `?consistency=sequential|linearizable` (default:
+      sequential). All writes are linearizable. For sequential reads, keep
+      using the same server.
+    * `version` is the store revision of a product's last change (one
+      counter for the whole store, never reused). Responses carry it as the
+      `ETag`; send it in `If-Match` to write only if nothing changed in
+      between (412 otherwise).
+    * Safe retries: writes take optional `Client-Id` and `Request-Seq`
+      headers (one write at a time, increasing numbers). Same number = a
+      retry: not applied again, the saved answer is returned. Smaller
+      number = 409.
+    * Read-modify-write: `PATCH /v1/products/{sku}/stock` and
+      `POST /v1/orders`.
+    * Errors are `application/problem+json` (RFC 9457); `default` covers
+      5xx, e.g. 503 when the server handling the request is unreachable.
+servers:
+  - url: /
+    description: The server that serves this page (use with /docs)
+  - url: http://localhost:8080
+    description: Node n1 (from Swagger Editor/UI containers; needs -cors-origin)
+tags:
+  - name: products
+    description: The product catalog and its stock levels
+  - name: orders
+    description: Atomic multi-product stock removal
+
+paths:
+  /v1/products:
+    get:
+      tags: [products]
+      operationId: listProducts
+      summary: List products, sorted
+      description: |
+        Use at most one of `sku` (repeatable) or `prefix`; none = all
+        products. Unknown SKUs are skipped.
+      parameters:
+        - name: sku
+          in: query
+          required: false
+          description: Repeat for several products (?sku=a&sku=b)
+          schema:
+            type: array
+            items:
+              type: string
+              minLength: 1
+          style: form
+          explode: true
+        - name: prefix
+          in: query
+          required: false
+          description: Only SKUs that start with this
+          schema:
+            type: string
+        - name: inStock
+          in: query
+          required: false
+          description: Only products with stock > 0 (false = no filter)
+          schema:
+            type: boolean
+            default: false
+        - $ref: '#/components/parameters/Sort'
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of products (0 or absent = no limit)
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+        - $ref: '#/components/parameters/Consistency'
+      responses:
+        '200':
+          description: The products, in sort order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductList'
+        '400':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    post:
+      tags: [products]
+      operationId: createProduct
+      summary: Add a new product
+      description: 409 if the SKU already exists.
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/RequestSeq'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewProduct'
+      responses:
+        '201':
+          description: Created; the new product
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+            Location:
+              $ref: '#/components/headers/Location'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [products]
+      operationId: deleteManyProducts
+      summary: Delete several products atomically
+      description: All or nothing. 404 if a product is missing, 400 if a SKU appears twice.
+      parameters:
+        - name: sku
+          in: query
+          required: true
+          description: Repeat for several products (?sku=a&sku=b)
+          schema:
+            type: array
+            minItems: 1
+            items:
+              type: string
+              minLength: 1
+          style: form
+          explode: true
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/RequestSeq'
+      responses:
+        '204':
+          description: All of them were deleted
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /v1/products/{sku}:
+    parameters:
+      - $ref: '#/components/parameters/Sku'
+    get:
+      tags: [products]
+      operationId: getProduct
+      summary: Read one product
+      parameters:
+        - $ref: '#/components/parameters/Consistency'
+      responses:
+        '200':
+          description: The product
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    patch:
+      tags: [products]
+      operationId: updateProduct
+      summary: Change the name and/or price
+      description: |
+        Give `name`, `priceCents` or both. Stock changes only through
+        `/stock` and orders.
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/RequestSeq'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductUpdate'
+      responses:
+        '200':
+          description: The product after the change
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [products]
+      operationId: deleteProduct
+      summary: Delete a product
+      parameters:
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/RequestSeq'
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '412':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /v1/products/{sku}/stock:
+    parameters:
+      - $ref: '#/components/parameters/Sku'
+    patch:
+      tags: [products]
+      operationId: addStock
+      summary: Add units to the stock (read-modify-write)
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/RequestSeq'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockChange'
+      responses:
+        '200':
+          description: The product after the change
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+  /v1/orders:
+    post:
+      tags: [orders]
+      operationId: placeOrder
+      summary: Remove stock from several products atomically (read-modify-write)
+      description: |
+        All or nothing. 404 if a product is missing, 409 if its stock is too
+        low, 400 if a SKU appears twice. Orders are not stored.
+      parameters:
+        - $ref: '#/components/parameters/ClientId'
+        - $ref: '#/components/parameters/RequestSeq'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Order'
+      responses:
+        '200':
+          description: Applied; the products after the order and its total
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResult'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+
+components:
+  parameters:
+    Sku:
+      name: sku
+      in: path
+      required: true
+      schema:
+        type: string
+    Consistency:
+      name: consistency
+      in: query
+      required: false
+      description: sequential may lag behind the latest write, linearizable never does. Unknown values give 400.
+      schema:
+        $ref: '#/components/schemas/Consistency'
+    Sort:
+      name: sort
+      in: query
+      required: false
+      description: Sort field; prefix `-` for descending. Ties break by SKU. Unknown values give 400.
+      schema:
+        type: string
+        enum: [sku, -sku, name, -name, priceCents, -priceCents, stock, -stock]
+        default: sku
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: Write only if the product's ETag (version) equals this, e.g. "42" (one version; anything else gives 400)
+      schema:
+        type: string
+    ClientId:
+      name: Client-Id
+      in: header
+      required: false
+      description: Who is writing, for safe retries (with Request-Seq)
+      schema:
+        type: string
+        minLength: 1
+    RequestSeq:
+      name: Request-Seq
+      in: header
+      required: false
+      description: This client's write number, increasing (with Client-Id)
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+
+  headers:
+    ETag:
+      description: The product's version, quoted (e.g. "42")
+      schema:
+        type: string
+    Location:
+      description: URI of the new product
+      schema:
+        type: string
+
+  responses:
+    Problem:
+      description: Error (RFC 9457 problem details)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Consistency:
+      type: string
+      enum: [sequential, linearizable]
+      default: sequential
+
+    Product:
+      type: object
+      required: [sku, name, priceCents, stock, version]
+      properties:
+        sku:
+          type: string
+        name:
+          type: string
+        priceCents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Unit price in cents (199 = 1.99)
+        stock:
+          type: integer
+          format: int64
+          minimum: 0
+        version:
+          type: integer
+          format: int64
+          description: Store revision of this product's last change
+
+    ProductList:
+      type: object
+      required: [products]
+      properties:
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+
+    NewProduct:
+      type: object
+      required: [sku, name, priceCents]
+      properties:
+        sku:
+          type: string
+          minLength: 1
+        name:
+          type: string
+          minLength: 1
+        priceCents:
+          type: integer
+          format: int64
+          minimum: 0
+        stock:
+          type: integer
+          format: int64
+          minimum: 0
+          default: 0
+
+    ProductUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+        priceCents:
+          type: integer
+          format: int64
+          minimum: 0
+
+    StockChange:
+      type: object
+      required: [add]
+      properties:
+        add:
+          type: integer
+          format: int64
+          minimum: 1
+
+    Order:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/OrderItem'
+
+    OrderItem:
+      type: object
+      required: [sku, quantity]
+      properties:
+        sku:
+          type: string
+        quantity:
+          type: integer
+          format: int64
+          minimum: 1
+
+    OrderResult:
+      type: object
+      required: [products, totalCents]
+      properties:
+        products:
+          type: array
+          description: The ordered products after the order, in request order
+          items:
+            $ref: '#/components/schemas/Product'
+        totalCents:
+          type: integer
+          format: int64
+          description: Sum of quantity x priceCents
+
+    Problem:
+      type: object
+      required: [title, status]
+      properties:
+        type:
+          type: string
+          default: about:blank
+        title:
+          type: string
+          description: Short summary, e.g. "Not Found"
+        status:
+          type: integer
+          description: The HTTP status code
+        detail:
+          type: string
+          description: What went wrong in this case
