@@ -22,10 +22,10 @@ make setup        # once: pins oapi-codegen, protoc-gen-go, protoc-gen-go-grpc i
 make check        # all in one: generators, build, two nodes, every status code checked
 
 make run          # generates, builds, starts node n1 (REST :8080, gRPC :50051)
-./etc/demo.sh     # in another terminal: one curl per operation and per error
+sh etc/demo.sh     # in another terminal: one curl per operation and per error
 
 make run2         # node n2 (REST :8081) forwards everything to n1 over gRPC
-./etc/demo.sh http://localhost:8081   # names say "from n1"
+sh etc/demo.sh http://localhost:8081   # names say "from n1"
 ```
 
 `make build` regenerates all generated code (`gen/`) from `api/openapi.yaml` and `proto/inventory/v1/inventory.proto`, then vets and builds `bin/server`.

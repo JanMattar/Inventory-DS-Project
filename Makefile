@@ -41,11 +41,11 @@ run2:
 	./bin/server -id n2 -http :8081 -grpc :50052 -target localhost:50051
 
 demo:
-	./etc/demo.sh
+	sh ./etc/demo.sh
 
 # Installs the generators, builds, starts two nodes and checks every status code.
 check:
-	./etc/check.sh
+	sh ./etc/check.sh
 
 # Optional: self-hosted Swagger Editor (:8090), Swagger UI (:8091), Scalar (:8092).
 TOOLS := docker compose -f docker/api-tools.compose.yaml
