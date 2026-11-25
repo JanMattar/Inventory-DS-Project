@@ -32,17 +32,17 @@ sh etc/demo.sh http://localhost:8081   # names say "from n1"
 
 ## The API
 
-A product is `{sku, name, priceCents, stock, version}`. Eight REST operations are served by six RPCs.
+A product is `{skuId, name, priceCents, stock, version}`. Eight REST operations are served by six RPCs.
 
 | Method | Path | Meaning | Codes | RPC |
 |---|---|---|---|---|
-| `GET` | `/v1/products` | List products: `?sku=` (repeat) or `?prefix=`; `?inStock=`, `?sort=` (e.g. `-stock`), `?limit=` | 200, 400 | `ReadProducts` |
-| `GET` | `/v1/products/{sku}` | Read one product; `ETag` = version | 200, 400, 404 | `ReadProducts` |
+| `GET` | `/v1/products` | List products: `?skuId=` (repeat) or `?prefix=`; `?inStock=`, `?sort=` (e.g. `-stock`), `?limit=` | 200, 400 | `ReadProducts` |
+| `GET` | `/v1/products/{skuId}` | Read one product; `ETag` = version | 200, 400, 404 | `ReadProducts` |
 | `POST` | `/v1/products` | Create a product; `ETag` and `Location` | 201, 400, 409 | `CreateProduct` |
-| `PATCH` | `/v1/products/{sku}` | Change name and/or price; optional `If-Match` | 200, 400, 404, 409, 412 | `UpdateProduct` |
-| `DELETE` | `/v1/products/{sku}` | Delete one product; optional `If-Match` | 204, 400, 404, 409, 412 | `DeleteProducts` |
-| `DELETE` | `/v1/products?sku=` | Delete several products, all or nothing | 204, 400, 404, 409 | `DeleteProducts` |
-| `PATCH` | `/v1/products/{sku}/stock` | Add stock: `{"add": n}` (read-modify-write) | 200, 400, 404, 409 | `AddStock` |
+| `PATCH` | `/v1/products` | Delete several products, all or nothing: `{"delete": [skuIds]}` | 204, 400, 404, 409 | `DeleteProducts` |
+| `PATCH` | `/v1/products/{skuId}` | Change name and/or price; optional `If-Match` | 200, 400, 404, 409, 412 | `UpdateProduct` |
+| `DELETE` | `/v1/products/{skuId}` | Delete one product; optional `If-Match` | 204, 400, 404, 409, 412 | `DeleteProducts` |
+| `PATCH` | `/v1/products/{skuId}/stock` | Add stock: `{"add": n}` (read-modify-write) | 200, 400, 404, 409 | `AddStock` |
 | `POST` | `/v1/orders` | Remove stock from several products, all or nothing (read-modify-write) | 200, 400, 404, 409 | `PlaceOrder` |
 
 - **Consistency:** reads take `?consistency=sequential|linearizable` (default sequential). All writes are linearizable. Unknown values give 400.
@@ -72,9 +72,9 @@ Reflection is on, so `grpcurl` works without the `.proto` file:
 
 ```sh
 grpcurl -plaintext localhost:50051 list
-grpcurl -plaintext -v -d '{"singleSku":"apple"}' localhost:50051 inventory.v1.Inventory/ReadProducts   # -v shows served-by
+grpcurl -plaintext -v -d '{"singleSkuId":"apple"}' localhost:50051 inventory.v1.Inventory/ReadProducts   # -v shows served-by
 grpcurl -plaintext -d '{"prefix":"","sort":{"field":"FIELD_STOCK","descending":true}}' localhost:50051 inventory.v1.Inventory/ReadProducts
-grpcurl -plaintext -H 'client-id: alice' -H 'request-seq: 6' -d '{"sku":"apple","add":5}' localhost:50051 inventory.v1.Inventory/AddStock
+grpcurl -plaintext -H 'client-id: alice' -H 'request-seq: 6' -d '{"skuId":"apple","add":5}' localhost:50051 inventory.v1.Inventory/AddStock
 ```
 
 ## Editing vs. viewing the API

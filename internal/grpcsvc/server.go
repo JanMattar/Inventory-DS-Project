@@ -82,17 +82,17 @@ func (s *Server) ReadProducts(req *inventoryv1.ReadProductsRequest, stream inven
 
 	var products []dummyProduct
 	switch selector := req.GetSelect().(type) {
-	case *inventoryv1.ReadProductsRequest_SingleSku: // exactly one: missing is an error
-		product, found := lookup(selector.SingleSku)
+	case *inventoryv1.ReadProductsRequest_SingleSkuId: // exactly one: missing is an error
+		product, found := lookup(selector.SingleSkuId)
 		if !found {
-			return status.Errorf(codes.NotFound, "product %q not found", selector.SingleSku)
+			return status.Errorf(codes.NotFound, "product %q not found", selector.SingleSkuId)
 		}
 		return stream.Send(&inventoryv1.ReadProductsResponse{Product: s.toProto(product, readNote)})
-	case *inventoryv1.ReadProductsRequest_SkuList: // several: missing ones are skipped
+	case *inventoryv1.ReadProductsRequest_SkuIdList: // several: missing ones are skipped
 		seen := map[string]bool{}
-		for _, sku := range selector.SkuList.GetSkus() {
+		for _, sku := range selector.SkuIdList.GetSkuIds() {
 			if sku == "" {
-				return status.Error(codes.InvalidArgument, "sku must not be empty")
+				return status.Error(codes.InvalidArgument, "skuId must not be empty")
 			}
 			product, found := lookup(sku)
 			if found && !seen[sku] {
@@ -144,17 +144,17 @@ func (s *Server) CreateProduct(ctx context.Context, req *inventoryv1.CreateProdu
 	if err != nil {
 		return nil, err
 	}
-	if req.GetSku() == "" || req.GetName() == "" {
-		return nil, status.Error(codes.InvalidArgument, "sku and name must not be empty")
+	if req.GetSkuId() == "" || req.GetName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "skuId and name must not be empty")
 	}
 	if req.GetPriceCents() < 0 || req.GetStock() < 0 {
 		return nil, status.Error(codes.InvalidArgument, "price and stock must not be negative")
 	}
-	_, exists := lookup(req.GetSku())
+	_, exists := lookup(req.GetSkuId())
 	if exists {
-		return nil, status.Errorf(codes.AlreadyExists, "product %q already exists", req.GetSku())
+		return nil, status.Errorf(codes.AlreadyExists, "product %q already exists", req.GetSkuId())
 	}
-	product := dummyProduct{req.GetSku(), req.GetName(), req.GetPriceCents(), req.GetStock(), dummyNextVersion}
+	product := dummyProduct{req.GetSkuId(), req.GetName(), req.GetPriceCents(), req.GetStock(), dummyNextVersion}
 	return &inventoryv1.CreateProductResponse{Product: s.toProto(product, "")}, nil
 }
 
@@ -172,9 +172,9 @@ func (s *Server) UpdateProduct(ctx context.Context, req *inventoryv1.UpdateProdu
 	case req.PriceCents != nil && *req.PriceCents < 0:
 		return nil, status.Error(codes.InvalidArgument, "price must not be negative")
 	}
-	product, found := lookup(req.GetSku()) // a copy, so the pretend store never changes
+	product, found := lookup(req.GetSkuId()) // a copy, so the pretend store never changes
 	if !found {
-		return nil, status.Errorf(codes.NotFound, "product %q not found", req.GetSku())
+		return nil, status.Errorf(codes.NotFound, "product %q not found", req.GetSkuId())
 	}
 	err = checkVersion(product, req.ExpectedVersion) // only once we know it exists
 	if err != nil {
@@ -203,7 +203,7 @@ func (s *Server) DeleteProducts(stream inventoryv1.Inventory_DeleteProductsServe
 	}
 	var skus []string
 	for _, toDelete := range deletes {
-		skus = append(skus, toDelete.GetSku())
+		skus = append(skus, toDelete.GetSkuId())
 	}
 	err = checkSkus(skus)
 	if err != nil {
@@ -211,9 +211,9 @@ func (s *Server) DeleteProducts(stream inventoryv1.Inventory_DeleteProductsServe
 	}
 	// Check every product before "deleting" anything: all or nothing.
 	for _, toDelete := range deletes {
-		product, found := lookup(toDelete.GetSku())
+		product, found := lookup(toDelete.GetSkuId())
 		if !found {
-			return status.Errorf(codes.NotFound, "product %q not found", toDelete.GetSku())
+			return status.Errorf(codes.NotFound, "product %q not found", toDelete.GetSkuId())
 		}
 		err = checkVersion(product, toDelete.ExpectedVersion)
 		if err != nil {
@@ -233,9 +233,9 @@ func (s *Server) AddStock(ctx context.Context, req *inventoryv1.AddStockRequest)
 	if req.GetAdd() < 1 {
 		return nil, status.Error(codes.InvalidArgument, "add must be at least 1")
 	}
-	product, found := lookup(req.GetSku())
+	product, found := lookup(req.GetSkuId())
 	if !found {
-		return nil, status.Errorf(codes.NotFound, "product %q not found", req.GetSku())
+		return nil, status.Errorf(codes.NotFound, "product %q not found", req.GetSkuId())
 	}
 	if product.stock > math.MaxInt64-req.GetAdd() {
 		return nil, status.Error(codes.InvalidArgument, "stock would overflow")
@@ -260,9 +260,9 @@ func (s *Server) PlaceOrder(stream inventoryv1.Inventory_PlaceOrderServer) error
 	var skus []string
 	for _, orderItem := range orderItems {
 		if orderItem.GetQuantity() < 1 {
-			return status.Errorf(codes.InvalidArgument, "%q: quantity must be at least 1", orderItem.GetSku())
+			return status.Errorf(codes.InvalidArgument, "%q: quantity must be at least 1", orderItem.GetSkuId())
 		}
-		skus = append(skus, orderItem.GetSku())
+		skus = append(skus, orderItem.GetSkuId())
 	}
 	err = checkSkus(skus)
 	if err != nil {
@@ -271,9 +271,9 @@ func (s *Server) PlaceOrder(stream inventoryv1.Inventory_PlaceOrderServer) error
 	// Check every item before "applying" anything: all or nothing.
 	var products []dummyProduct
 	for _, orderItem := range orderItems {
-		product, found := lookup(orderItem.GetSku())
+		product, found := lookup(orderItem.GetSkuId())
 		if !found {
-			return status.Errorf(codes.NotFound, "product %q not found", orderItem.GetSku())
+			return status.Errorf(codes.NotFound, "product %q not found", orderItem.GetSkuId())
 		}
 		if orderItem.GetQuantity() > product.stock {
 			return status.Errorf(codes.FailedPrecondition,
@@ -308,7 +308,7 @@ func lookup(sku string) (dummyProduct, bool) {
 
 func (s *Server) toProto(product dummyProduct, note string) *inventoryv1.Product {
 	return &inventoryv1.Product{
-		Sku:        product.sku,
+		SkuId:      product.sku,
 		Name:       fmt.Sprintf("%s (dummy from %s%s)", product.name, s.NodeID, note),
 		PriceCents: product.price,
 		Stock:      product.stock,
@@ -363,9 +363,9 @@ func checkSkus(skus []string) error {
 	for _, sku := range skus {
 		switch {
 		case sku == "":
-			return status.Error(codes.InvalidArgument, "sku must not be empty")
+			return status.Error(codes.InvalidArgument, "skuId must not be empty")
 		case seen[sku]:
-			return status.Errorf(codes.InvalidArgument, "sku %q appears twice", sku)
+			return status.Errorf(codes.InvalidArgument, "skuId %q appears twice", sku)
 		default:
 			seen[sku] = true
 		}

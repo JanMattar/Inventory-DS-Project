@@ -7,12 +7,13 @@
 //
 // Eight REST operations share six RPCs:
 //
-//	GET    /v1/products, /v1/products/{sku}  -> ReadProducts   (server stream)
-//	DELETE /v1/products, /v1/products/{sku}  -> DeleteProducts (client stream)
-//	POST   /v1/products                      -> CreateProduct
-//	PATCH  /v1/products/{sku}                -> UpdateProduct
-//	PATCH  /v1/products/{sku}/stock          -> AddStock
-//	POST   /v1/orders                        -> PlaceOrder     (client stream)
+//	GET    /v1/products, /v1/products/{skuId}  -> ReadProducts   (server stream)
+//	PATCH  /v1/products {"delete": [..]}       -> DeleteProducts (client stream)
+//	DELETE /v1/products/{skuId}                -> DeleteProducts (client stream)
+//	POST   /v1/products                        -> CreateProduct
+//	PATCH  /v1/products/{skuId}                -> UpdateProduct
+//	PATCH  /v1/products/{skuId}/stock          -> AddStock
+//	POST   /v1/orders                          -> PlaceOrder     (client stream)
 //
 // Handlers hold NO application state. That is deliberate: in Parts II-III
 // the gRPC target becomes "the server responsible for this request", which
@@ -60,7 +61,7 @@ func NewHTTPHandler(inventory inventoryv1.InventoryClient, mux *http.ServeMux) h
 	})
 	return rest.HandlerWithOptions(strict, rest.StdHTTPServerOptions{
 		BaseRouter: mux,
-		// Bad parameters (e.g. limit=abc, no sku) -> 400, as problem+json too.
+		// Bad parameters (e.g. limit=abc) -> 400, as problem+json too.
 		ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
 			writeProblem(w, http.StatusBadRequest, err.Error())
 		},
@@ -71,7 +72,7 @@ func NewHTTPHandler(inventory inventoryv1.InventoryClient, mux *http.ServeMux) h
 // Reads
 // ---------------------------------------------------------------------------
 
-// GET /v1/products?sku=..&sku=.. | ?prefix=..  [&inStock=&sort=&limit=&consistency=]
+// GET /v1/products?skuId=..&skuId=.. | ?prefix=..  [&inStock=&sort=&limit=&consistency=]
 func (h *Handlers) ListProducts(ctx context.Context, req rest.ListProductsRequestObject) (rest.ListProductsResponseObject, error) {
 	params := req.Params
 	consistency, err := toProtoConsistency(params.Consistency)
@@ -82,8 +83,8 @@ func (h *Handlers) ListProducts(ctx context.Context, req rest.ListProductsReques
 	if err != nil {
 		return nil, err
 	}
-	if params.Sku != nil && params.Prefix != nil {
-		return nil, status.Error(codes.InvalidArgument, "give at most one of sku or prefix")
+	if params.SkuId != nil && params.Prefix != nil {
+		return nil, status.Error(codes.InvalidArgument, "give at most one of skuId or prefix")
 	}
 	readRequest := &inventoryv1.ReadProductsRequest{
 		InStock:     deref(params.InStock),
@@ -91,8 +92,8 @@ func (h *Handlers) ListProducts(ctx context.Context, req rest.ListProductsReques
 		Limit:       deref(params.Limit),
 		Consistency: consistency,
 	}
-	if params.Sku != nil { // always a list, even for one sku: unknown ones are skipped, not 404
-		readRequest.Select = &inventoryv1.ReadProductsRequest_SkuList{SkuList: &inventoryv1.SkuList{Skus: *params.Sku}}
+	if params.SkuId != nil { // always a list, even for one skuId: unknown ones are skipped, not 404
+		readRequest.Select = &inventoryv1.ReadProductsRequest_SkuIdList{SkuIdList: &inventoryv1.SkuIdList{SkuIds: *params.SkuId}}
 	}
 	if params.Prefix != nil {
 		readRequest.Select = &inventoryv1.ReadProductsRequest_Prefix{Prefix: *params.Prefix}
@@ -109,14 +110,14 @@ func (h *Handlers) ListProducts(ctx context.Context, req rest.ListProductsReques
 	return rest.ListProducts200JSONResponse{Products: products}, nil
 }
 
-// GET /v1/products/{sku} — a ReadProducts of one product; its first message is it.
+// GET /v1/products/{skuId} — a ReadProducts of one product; its first message is it.
 func (h *Handlers) GetProduct(ctx context.Context, req rest.GetProductRequestObject) (rest.GetProductResponseObject, error) {
 	consistency, err := toProtoConsistency(req.Params.Consistency)
 	if err != nil {
 		return nil, err
 	}
 	stream, err := h.Inventory.ReadProducts(ctx, &inventoryv1.ReadProductsRequest{
-		Select:      &inventoryv1.ReadProductsRequest_SingleSku{SingleSku: req.Sku},
+		Select:      &inventoryv1.ReadProductsRequest_SingleSkuId{SingleSkuId: req.SkuId},
 		Consistency: consistency,
 	})
 	if err != nil {
@@ -142,7 +143,7 @@ func (h *Handlers) CreateProduct(ctx context.Context, req rest.CreateProductRequ
 	ctx = withRetryHeaders(ctx, req.Params.ClientId, req.Params.RequestSeq)
 	newProduct := req.Body
 	reply, err := h.Inventory.CreateProduct(ctx, &inventoryv1.CreateProductRequest{
-		Sku:        newProduct.Sku,
+		SkuId:      newProduct.SkuId,
 		Name:       newProduct.Name,
 		PriceCents: newProduct.PriceCents,
 		Stock:      deref(newProduct.Stock),
@@ -155,12 +156,12 @@ func (h *Handlers) CreateProduct(ctx context.Context, req rest.CreateProductRequ
 		Body: productFromProto(product),
 		Headers: rest.CreateProduct201ResponseHeaders{
 			ETag:     ptr(etag(product.GetVersion())),
-			Location: ptr("/v1/products/" + url.PathEscape(product.GetSku())),
+			Location: ptr("/v1/products/" + url.PathEscape(product.GetSkuId())),
 		},
 	}, nil
 }
 
-// PATCH /v1/products/{sku} — change the name and/or price.
+// PATCH /v1/products/{skuId} — change the name and/or price.
 func (h *Handlers) UpdateProduct(ctx context.Context, req rest.UpdateProductRequestObject) (rest.UpdateProductResponseObject, error) {
 	expectedVersion, err := versionFromIfMatch(req.Params.IfMatch)
 	if err != nil {
@@ -168,7 +169,7 @@ func (h *Handlers) UpdateProduct(ctx context.Context, req rest.UpdateProductRequ
 	}
 	ctx = withRetryHeaders(ctx, req.Params.ClientId, req.Params.RequestSeq)
 	reply, err := h.Inventory.UpdateProduct(ctx, &inventoryv1.UpdateProductRequest{
-		Sku:             req.Sku,
+		SkuId:           req.SkuId,
 		Name:            req.Body.Name,
 		PriceCents:      req.Body.PriceCents,
 		ExpectedVersion: expectedVersion,
@@ -183,26 +184,27 @@ func (h *Handlers) UpdateProduct(ctx context.Context, req rest.UpdateProductRequ
 	}, nil
 }
 
-// DELETE /v1/products/{sku} — a DeleteProducts stream with one product.
+// DELETE /v1/products/{skuId} — a DeleteProducts stream with one product.
 func (h *Handlers) DeleteProduct(ctx context.Context, req rest.DeleteProductRequestObject) (rest.DeleteProductResponseObject, error) {
 	expectedVersion, err := versionFromIfMatch(req.Params.IfMatch)
 	if err != nil {
 		return nil, err
 	}
 	ctx = withRetryHeaders(ctx, req.Params.ClientId, req.Params.RequestSeq)
-	err = h.sendDeletes(ctx, []*inventoryv1.DeleteProductsRequest{{Sku: req.Sku, ExpectedVersion: expectedVersion}})
+	err = h.sendDeletes(ctx, []*inventoryv1.DeleteProductsRequest{{SkuId: req.SkuId, ExpectedVersion: expectedVersion}})
 	if err != nil {
 		return nil, err // NOT_FOUND -> 404, ABORTED -> 412
 	}
 	return rest.DeleteProduct204Response{}, nil
 }
 
-// DELETE /v1/products?sku=..&sku=.. — all of them or none.
+// PATCH /v1/products {"delete": [..]} — a batch change of the collection:
+// all of them or none.
 func (h *Handlers) DeleteManyProducts(ctx context.Context, req rest.DeleteManyProductsRequestObject) (rest.DeleteManyProductsResponseObject, error) {
 	ctx = withRetryHeaders(ctx, req.Params.ClientId, req.Params.RequestSeq)
 	var deletes []*inventoryv1.DeleteProductsRequest
-	for _, sku := range req.Params.Sku {
-		deletes = append(deletes, &inventoryv1.DeleteProductsRequest{Sku: sku})
+	for _, skuID := range req.Body.Delete {
+		deletes = append(deletes, &inventoryv1.DeleteProductsRequest{SkuId: skuID})
 	}
 	err := h.sendDeletes(ctx, deletes)
 	if err != nil {
@@ -211,10 +213,10 @@ func (h *Handlers) DeleteManyProducts(ctx context.Context, req rest.DeleteManyPr
 	return rest.DeleteManyProducts204Response{}, nil
 }
 
-// PATCH /v1/products/{sku}/stock — add units to the stock.
+// PATCH /v1/products/{skuId}/stock — add units to the stock.
 func (h *Handlers) AddStock(ctx context.Context, req rest.AddStockRequestObject) (rest.AddStockResponseObject, error) {
 	ctx = withRetryHeaders(ctx, req.Params.ClientId, req.Params.RequestSeq)
-	reply, err := h.Inventory.AddStock(ctx, &inventoryv1.AddStockRequest{Sku: req.Sku, Add: req.Body.Add})
+	reply, err := h.Inventory.AddStock(ctx, &inventoryv1.AddStockRequest{SkuId: req.SkuId, Add: req.Body.Add})
 	if err != nil {
 		return nil, err // NOT_FOUND -> 404
 	}
@@ -230,7 +232,7 @@ func (h *Handlers) PlaceOrder(ctx context.Context, req rest.PlaceOrderRequestObj
 	ctx = withRetryHeaders(ctx, req.Params.ClientId, req.Params.RequestSeq)
 	var orderItems []*inventoryv1.PlaceOrderRequest
 	for _, orderItem := range req.Body.Items {
-		orderItems = append(orderItems, &inventoryv1.PlaceOrderRequest{Sku: orderItem.Sku, Quantity: orderItem.Quantity})
+		orderItems = append(orderItems, &inventoryv1.PlaceOrderRequest{SkuId: orderItem.SkuId, Quantity: orderItem.Quantity})
 	}
 	reply, err := h.sendOrderItems(ctx, orderItems)
 	if err != nil {
@@ -330,13 +332,13 @@ func toProtoConsistency[T ~string](consistency *T) (inventoryv1.Consistency, err
 // toProtoSort turns "stock" / "-stock" into a SortOrder; unknown values are a 400.
 func toProtoSort[T ~string](sortParam *T) (*inventoryv1.SortOrder, error) {
 	if sortParam == nil {
-		return nil, nil // default: by sku, ascending
+		return nil, nil // default: by skuId, ascending
 	}
 	fieldName, descending := strings.CutPrefix(string(*sortParam), "-")
 	sortOrder := &inventoryv1.SortOrder{Descending: descending}
 	switch fieldName {
-	case "sku":
-		sortOrder.Field = inventoryv1.SortOrder_FIELD_SKU
+	case "skuId":
+		sortOrder.Field = inventoryv1.SortOrder_FIELD_SKU_ID
 	case "name":
 		sortOrder.Field = inventoryv1.SortOrder_FIELD_NAME
 	case "priceCents":
@@ -351,7 +353,7 @@ func toProtoSort[T ~string](sortParam *T) (*inventoryv1.SortOrder, error) {
 
 func productFromProto(product *inventoryv1.Product) rest.Product {
 	return rest.Product{
-		Sku:        product.GetSku(),
+		SkuId:      product.GetSkuId(),
 		Name:       product.GetName(),
 		PriceCents: product.GetPriceCents(),
 		Stock:      product.GetStock(),

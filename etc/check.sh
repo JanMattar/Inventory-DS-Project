@@ -37,18 +37,18 @@ for B in http://localhost:18080 http://localhost:18081; do
   echo " $B"
   # reads
   expect 200 GET    "/v1/products"
-  expect 200 GET    "/v1/products?sku=apple&sku=kiwi&sort=-stock"
+  expect 200 GET    "/v1/products?skuId=apple&skuId=kiwi&sort=-stock"
   expect 200 GET    "/v1/products?prefix=b&inStock=true&limit=1&consistency=linearizable"
-  expect 400 GET    "/v1/products?sku=apple&prefix=a"
+  expect 400 GET    "/v1/products?skuId=apple&prefix=a"
   expect 400 GET    "/v1/products?consistency=linearisable"
   expect 400 GET    "/v1/products?sort=color"
   expect 400 GET    "/v1/products?limit=notanumber"
   expect 200 GET    "/v1/products/apple?consistency=linearizable"
   expect 404 GET    "/v1/products/kiwi"
   # create
-  expect 201 POST   "/v1/products" -H "$J" -d '{"sku":"kiwi","name":"Kiwi","priceCents":30,"stock":5}'
-  expect 409 POST   "/v1/products" -H "$J" -d '{"sku":"apple","name":"Apple","priceCents":50}'
-  expect 400 POST   "/v1/products" -H "$J" -d '{"sku":"","name":"Nothing","priceCents":1}'
+  expect 201 POST   "/v1/products" -H "$J" -d '{"skuId":"kiwi","name":"Kiwi","priceCents":30,"stock":5}'
+  expect 409 POST   "/v1/products" -H "$J" -d '{"skuId":"apple","name":"Apple","priceCents":50}'
+  expect 400 POST   "/v1/products" -H "$J" -d '{"skuId":"","name":"Nothing","priceCents":1}'
   expect 400 POST   "/v1/products" -H "$J" -d '{bad json'
   # update
   expect 200 PATCH  "/v1/products/apple" -H "$J" -d '{"priceCents":60}'
@@ -57,34 +57,34 @@ for B in http://localhost:18080 http://localhost:18081; do
   expect 400 PATCH  "/v1/products/apple" -H "$J" -H 'If-Match: abc' -d '{"priceCents":1}'
   expect 404 PATCH  "/v1/products/kiwi"  -H "$J" -d '{"priceCents":1}'
   expect 400 PATCH  "/v1/products/apple" -H "$J" -d '{}'
-  # delete one / several
+  # delete one (DELETE) / several (PATCH batch)
   expect 204 DELETE "/v1/products/apple"
   expect 412 DELETE "/v1/products/apple" -H 'If-Match: "9"'
   expect 404 DELETE "/v1/products/kiwi"
-  expect 204 DELETE "/v1/products?sku=apple&sku=banana"
-  expect 404 DELETE "/v1/products?sku=apple&sku=kiwi"
-  expect 400 DELETE "/v1/products?sku=apple&sku=apple"
-  expect 400 DELETE "/v1/products"
+  expect 204 PATCH  "/v1/products" -H "$J" -d '{"delete":["apple","banana"]}'
+  expect 404 PATCH  "/v1/products" -H "$J" -d '{"delete":["apple","kiwi"]}'
+  expect 400 PATCH  "/v1/products" -H "$J" -d '{"delete":["apple","apple"]}'
+  expect 400 PATCH  "/v1/products" -H "$J" -d '{"delete":[]}'
   # read-modify-write: stock and orders
   expect 200 PATCH  "/v1/products/cherry/stock" -H "$J" -d '{"add":5}'
   expect 400 PATCH  "/v1/products/cherry/stock" -H "$J" -d '{"add":0}'
   expect 404 PATCH  "/v1/products/kiwi/stock"   -H "$J" -d '{"add":5}'
-  expect 200 POST   "/v1/orders" -H "$J" -d '{"items":[{"sku":"apple","quantity":2},{"sku":"banana","quantity":3}]}'
-  expect 409 POST   "/v1/orders" -H "$J" -d '{"items":[{"sku":"cherry","quantity":1}]}'
-  expect 404 POST   "/v1/orders" -H "$J" -d '{"items":[{"sku":"apple","quantity":1},{"sku":"kiwi","quantity":1}]}'
-  expect 400 POST   "/v1/orders" -H "$J" -d '{"items":[{"sku":"apple","quantity":0}]}'
-  expect 400 POST   "/v1/orders" -H "$J" -d '{"items":[{"sku":"apple","quantity":1},{"sku":"apple","quantity":1}]}'
+  expect 200 POST   "/v1/orders" -H "$J" -d '{"items":[{"skuId":"apple","quantity":2},{"skuId":"banana","quantity":3}]}'
+  expect 409 POST   "/v1/orders" -H "$J" -d '{"items":[{"skuId":"cherry","quantity":1}]}'
+  expect 404 POST   "/v1/orders" -H "$J" -d '{"items":[{"skuId":"apple","quantity":1},{"skuId":"kiwi","quantity":1}]}'
+  expect 400 POST   "/v1/orders" -H "$J" -d '{"items":[{"skuId":"apple","quantity":0}]}'
+  expect 400 POST   "/v1/orders" -H "$J" -d '{"items":[{"skuId":"apple","quantity":1},{"skuId":"apple","quantity":1}]}'
   # safe retries (the dummy pretends every client's last write was number 5)
-  expect 200 POST   "/v1/orders" -H "$J" -H 'Client-Id: alice' -H 'Request-Seq: 6' -d '{"items":[{"sku":"apple","quantity":1}]}'
-  expect 200 POST   "/v1/orders" -H "$J" -H 'Client-Id: alice' -H 'Request-Seq: 5' -d '{"items":[{"sku":"apple","quantity":1}]}'
-  expect 409 POST   "/v1/orders" -H "$J" -H 'Client-Id: alice' -H 'Request-Seq: 4' -d '{"items":[{"sku":"apple","quantity":1}]}'
-  expect 400 POST   "/v1/orders" -H "$J" -H 'Client-Id: alice' -d '{"items":[{"sku":"apple","quantity":1}]}'
+  expect 200 POST   "/v1/orders" -H "$J" -H 'Client-Id: alice' -H 'Request-Seq: 6' -d '{"items":[{"skuId":"apple","quantity":1}]}'
+  expect 200 POST   "/v1/orders" -H "$J" -H 'Client-Id: alice' -H 'Request-Seq: 5' -d '{"items":[{"skuId":"apple","quantity":1}]}'
+  expect 409 POST   "/v1/orders" -H "$J" -H 'Client-Id: alice' -H 'Request-Seq: 4' -d '{"items":[{"skuId":"apple","quantity":1}]}'
+  expect 400 POST   "/v1/orders" -H "$J" -H 'Client-Id: alice' -d '{"items":[{"skuId":"apple","quantity":1}]}'
 done
 
 # Details a status code does not show.
 B=http://localhost:18080
 curl -si "$B/v1/products/apple" | grep -qi '^etag: "3"' && echo "  ok   ETag header" || { echo "  FAIL ETag header"; FAIL=1; }
-curl -si -X POST "$B/v1/products" -H "$J" -d '{"sku":"kiwi","name":"Kiwi","priceCents":30}' | grep -qi '^location: /v1/products/kiwi' && echo "  ok   Location header" || { echo "  FAIL Location header"; FAIL=1; }
+curl -si -X POST "$B/v1/products" -H "$J" -d '{"skuId":"kiwi","name":"Kiwi","priceCents":30}' | grep -qi '^location: /v1/products/kiwi' && echo "  ok   Location header" || { echo "  FAIL Location header"; FAIL=1; }
 curl -si "$B/v1/products/kiwi" | grep -qi '^content-type: application/problem+json' && echo "  ok   problem+json errors" || { echo "  FAIL problem+json errors"; FAIL=1; }
 curl -si "$B/v1/products?limit=notanumber" | grep -qi '^content-type: application/problem+json' && echo "  ok   problem+json for bad parameters" || { echo "  FAIL problem+json for bad parameters"; FAIL=1; }
 curl -s "$B/v1/products?inStock=true" | grep -q 'cherry' && { echo "  FAIL inStock filter"; FAIL=1; } || echo "  ok   inStock filter"

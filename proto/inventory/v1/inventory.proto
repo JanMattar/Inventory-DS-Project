@@ -16,9 +16,10 @@ option go_package = "github.com/your-team/inventory/gen/inventory/v1;inventoryv1
 
 service Inventory {
   // One product, a list or a prefix; results stream back sorted.
-  // NOT_FOUND only when a single_sku was asked for and it is missing.
+  // NOT_FOUND only when a single_sku_id was asked for and it is missing.
   rpc ReadProducts(ReadProductsRequest) returns (stream ReadProductsResponse);
-  // ALREADY_EXISTS if the sku exists.
+  
+  // ALREADY_EXISTS if the sku_id exists.
   rpc CreateProduct(CreateProductRequest) returns (CreateProductResponse);
   // NOT_FOUND if missing; ABORTED if expected_version differs.
   rpc UpdateProduct(UpdateProductRequest) returns (UpdateProductResponse);
@@ -40,7 +41,7 @@ enum Consistency {
 }
 
 message Product {
-  string sku = 1;
+  string sku_id = 1;
   string name = 2;
   int64 price_cents = 3;
   int64 stock = 4;
@@ -50,8 +51,8 @@ message Product {
 // ---- ReadProducts ------------------------------------------------------
 message ReadProductsRequest {
   oneof select {                // none = all products
-    string single_sku = 1;      // exactly one product
-    SkuList sku_list = 2;       // several (unknown ones are skipped)
+    string single_sku_id = 1;   // exactly one product
+    SkuIdList sku_id_list = 2;  // several (unknown ones are skipped)
     string prefix = 3;          // all SKUs with this prefix
   }
   bool in_stock = 4;            // only products with stock > 0
@@ -59,11 +60,11 @@ message ReadProductsRequest {
   int32 limit = 6;              // 0 = no limit
   Consistency consistency = 7;
 }
-message SkuList { repeated string skus = 1; }
+message SkuIdList { repeated string sku_ids = 1; }
 message SortOrder {
-  enum Field { FIELD_SKU = 0; FIELD_NAME = 1; FIELD_PRICE_CENTS = 2; FIELD_STOCK = 3; }
+  enum Field { FIELD_SKU_ID = 0; FIELD_NAME = 1; FIELD_PRICE_CENTS = 2; FIELD_STOCK = 3; }
   Field field = 1;
-  bool descending = 2;          // ties are always broken by sku, ascending
+  bool descending = 2;          // ties are always broken by sku_id, ascending
 }
 message ReadProductsResponse {
   Product product = 1;          // one message per product, in sort order
@@ -71,7 +72,7 @@ message ReadProductsResponse {
 
 // ---- CreateProduct -----------------------------------------------------
 message CreateProductRequest {
-  string sku = 1;
+  string sku_id = 1;
   string name = 2;
   int64 price_cents = 3;
   int64 stock = 4;              // initial stock
@@ -80,7 +81,7 @@ message CreateProductResponse { Product product = 1; }
 
 // ---- UpdateProduct -----------------------------------------------------
 message UpdateProductRequest {
-  string sku = 1;
+  string sku_id = 1;
   optional string name = 2;     // absent = unchanged
   optional int64 price_cents = 3;
   optional int64 expected_version = 4;  // from If-Match
@@ -89,21 +90,21 @@ message UpdateProductResponse { Product product = 1; }
 
 // ---- DeleteProducts ----------------------------------------------------
 message DeleteProductsRequest { // one message per product
-  string sku = 1;
+  string sku_id = 1;
   optional int64 expected_version = 2;  // from If-Match
 }
 message DeleteProductsResponse {} // success = every product was deleted
 
 // ---- AddStock ----------------------------------------------------------
 message AddStockRequest {
-  string sku = 1;
+  string sku_id = 1;
   int64 add = 2;                // >= 1
 }
 message AddStockResponse { Product product = 1; }
 
 // ---- PlaceOrder --------------------------------------------------------
 message PlaceOrderRequest {     // one message per item
-  string sku = 1;
+  string sku_id = 1;
   int64 quantity = 2;           // >= 1
 }
 message PlaceOrderResponse {

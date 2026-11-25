@@ -17,8 +17,9 @@ info:
       headers (one write at a time, increasing numbers). Same number = a
       retry: not applied again, the saved answer is returned. Smaller
       number = 409.
-    * Read-modify-write: `PATCH /v1/products/{sku}/stock` and
+    * Read-modify-write: `PATCH /v1/products/{skuId}/stock` and
       `POST /v1/orders`.
+    * Batch delete: `PATCH /v1/products` with `{"delete": [skuIds]}`.
     * Errors are `application/problem+json` (RFC 9457); `default` covers
       5xx, e.g. 503 when the server handling the request is unreachable.
 servers:
@@ -39,13 +40,13 @@ paths:
       operationId: listProducts
       summary: List products, sorted
       description: |
-        Use at most one of `sku` (repeatable) or `prefix`; none = all
+        Use at most one of `skuId` (repeatable) or `prefix`; none = all
         products. Unknown SKUs are skipped.
       parameters:
-        - name: sku
+        - name: skuId
           in: query
           required: false
-          description: Repeat for several products (?sku=a&sku=b)
+          description: Repeat for several products (?skuId=a&skuId=b)
           schema:
             type: array
             items:
@@ -119,26 +120,22 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
-    delete:
+    patch:
       tags: [products]
       operationId: deleteManyProducts
       summary: Delete several products atomically
-      description: All or nothing. 404 if a product is missing, 400 if a SKU appears twice.
+      description: |
+        A batch change of the collection; the SKUs travel in the body. All or
+        nothing. 404 if a product is missing, 400 if a SKU appears twice.
       parameters:
-        - name: sku
-          in: query
-          required: true
-          description: Repeat for several products (?sku=a&sku=b)
-          schema:
-            type: array
-            minItems: 1
-            items:
-              type: string
-              minLength: 1
-          style: form
-          explode: true
         - $ref: '#/components/parameters/ClientId'
         - $ref: '#/components/parameters/RequestSeq'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductBatch'
       responses:
         '204':
           description: All of them were deleted
@@ -151,9 +148,9 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /v1/products/{sku}:
+  /v1/products/{skuId}:
     parameters:
-      - $ref: '#/components/parameters/Sku'
+      - $ref: '#/components/parameters/SkuId'
     get:
       tags: [products]
       operationId: getProduct
@@ -235,9 +232,9 @@ paths:
         default:
           $ref: '#/components/responses/Problem'
 
-  /v1/products/{sku}/stock:
+  /v1/products/{skuId}/stock:
     parameters:
-      - $ref: '#/components/parameters/Sku'
+      - $ref: '#/components/parameters/SkuId'
     patch:
       tags: [products]
       operationId: addStock
@@ -305,8 +302,8 @@ paths:
 
 components:
   parameters:
-    Sku:
-      name: sku
+    SkuId:
+      name: skuId
       in: path
       required: true
       schema:
@@ -325,8 +322,8 @@ components:
       description: Sort field; prefix `-` for descending. Ties break by SKU. Unknown values give 400.
       schema:
         type: string
-        enum: [sku, -sku, name, -name, priceCents, -priceCents, stock, -stock]
-        default: sku
+        enum: [skuId, -skuId, name, -name, priceCents, -priceCents, stock, -stock]
+        default: skuId
     IfMatch:
       name: If-Match
       in: header
@@ -378,9 +375,9 @@ components:
 
     Product:
       type: object
-      required: [sku, name, priceCents, stock, version]
+      required: [skuId, name, priceCents, stock, version]
       properties:
-        sku:
+        skuId:
           type: string
         name:
           type: string
@@ -409,9 +406,9 @@ components:
 
     NewProduct:
       type: object
-      required: [sku, name, priceCents]
+      required: [skuId, name, priceCents]
       properties:
-        sku:
+        skuId:
           type: string
           minLength: 1
         name:
@@ -439,6 +436,18 @@ components:
           format: int64
           minimum: 0
 
+    ProductBatch:
+      type: object
+      required: [delete]
+      properties:
+        delete:
+          type: array
+          minItems: 1
+          description: SKUs of the products to delete, all or nothing
+          items:
+            type: string
+            minLength: 1
+
     StockChange:
       type: object
       required: [add]
@@ -460,9 +469,9 @@ components:
 
     OrderItem:
       type: object
-      required: [sku, quantity]
+      required: [skuId, quantity]
       properties:
-        sku:
+        skuId:
           type: string
         quantity:
           type: integer
