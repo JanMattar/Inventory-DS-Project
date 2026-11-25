@@ -1,9 +1,10 @@
-# Part I build. Requires: Go >= 1.26, protoc (https://protobuf.dev/installation/).
+# Build. Requires: Go >= 1.26, protoc (https://protobuf.dev/installation/).
 MODULE := github.com/your-team/inventory
+PROTOS := proto/inventory/v1/inventory.proto proto/inventory/v1/sm.proto
 CORS ?=           # e.g. make run CORS='*'  (only for the API-tool containers on :8090-:8092)
 export PATH := $(shell go env GOPATH)/bin:$(PATH)
 
-.PHONY: setup gen gen-rest gen-proto build run run2 demo check tools-up tools-down swagger-up swagger-down clean
+.PHONY: setup gen gen-rest gen-proto build test run run2 demo check tools-up tools-down swagger-up swagger-down clean
 
 # One-time: record the code generators as Go tools (pinned in go.mod) and install them.
 setup:
@@ -20,21 +21,30 @@ gen-rest:
 	mkdir -p gen/rest
 	go tool oapi-codegen -config api/oapi-codegen.yaml api/openapi.yaml
 
-# Steps 3-4: .proto -> Go messages + gRPC stubs (gen/inventory/v1/*.pb.go)
+# .proto -> Go messages + gRPC stubs (gen/inventory/v1/*.pb.go): the gRPC
+# service (Part I) and the state machine's messages (Part II)
 gen-proto:
 	@command -v protoc >/dev/null || { echo "protoc not found. Install it: https://protobuf.dev/installation/ (macOS: brew install protobuf)"; exit 1; }
 	protoc -I proto \
 	  --go_out=. --go_opt=module=$(MODULE) \
 	  --go-grpc_out=. --go-grpc_opt=module=$(MODULE) \
-	  proto/inventory/v1/inventory.proto
+	  $(PROTOS)
 
 build: gen
 	go mod tidy
 	go vet ./...
 	go build -o bin/server ./cmd/server
 
+# Unit tests of the state machine and the executor, with the race detector.
+test: gen
+	go test -race ./...
+
+# Part II: the server keeps real state; n1 starts from the sample inventory (a
+# Snapshot in prototext). Swagger UI: http://localhost:8080/docs runs real commands.
+RUNFLAGS := -snapshot etc/sample-snapshot.txtpb
+
 run: build
-	./bin/server -id n1 -http :8080 -grpc :50051 -cors-origin '$(CORS)'
+	./bin/server -id n1 -http :8080 -grpc :50051 $(RUNFLAGS) -cors-origin '$(CORS)'
 
 # Second node whose REST API forwards every call to n1 over gRPC.
 run2:

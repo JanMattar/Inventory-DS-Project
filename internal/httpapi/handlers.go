@@ -110,7 +110,8 @@ func (h *Handlers) ListProducts(ctx context.Context, req rest.ListProductsReques
 	return rest.ListProducts200JSONResponse{Products: products}, nil
 }
 
-// GET /v1/products/{skuId} — a ReadProducts of one product; its first message is it.
+// GET /v1/products/{skuId} — a ReadProducts of one product: the product,
+// then the fin message.
 func (h *Handlers) GetProduct(ctx context.Context, req rest.GetProductRequestObject) (rest.GetProductResponseObject, error) {
 	consistency, err := toProtoConsistency(req.Params.Consistency)
 	if err != nil {
@@ -123,14 +124,17 @@ func (h *Handlers) GetProduct(ctx context.Context, req rest.GetProductRequestObj
 	if err != nil {
 		return nil, err
 	}
-	message, err := stream.Recv()
+	products, err := recvProducts(stream)
 	if err != nil {
 		return nil, err // NOT_FOUND -> 404
 	}
-	product := message.GetProduct()
+	if len(products) != 1 {
+		return nil, status.Errorf(codes.Internal, "read of one product returned %d", len(products))
+	}
+	product := products[0]
 	return rest.GetProduct200JSONResponse{
-		Body:    productFromProto(product),
-		Headers: rest.GetProduct200ResponseHeaders{ETag: ptr(etag(product.GetVersion()))}, // optional header -> *string
+		Body:    product,
+		Headers: rest.GetProduct200ResponseHeaders{ETag: ptr(etag(product.Version))}, // optional header -> *string
 	}, nil
 }
 
@@ -248,16 +252,26 @@ func (h *Handlers) PlaceOrder(ctx context.Context, req rest.PlaceOrderRequestObj
 // Streams: how a handler drives the three streaming RPCs
 // ---------------------------------------------------------------------------
 
-// recvProducts reads a ReadProducts stream to the end.
+// recvProducts reads a ReadProducts stream to the end. The last message must
+// say fin: a stream that ends without it was cut off, so its answer is
+// incomplete and is not returned.
 func recvProducts(stream inventoryv1.Inventory_ReadProductsClient) ([]rest.Product, error) {
 	products := []rest.Product{} // serialize as [] rather than null
+	fin := false
 	for {
 		message, err := stream.Recv()
 		if errors.Is(err, io.EOF) { // the server finished sending
+			if !fin {
+				return nil, status.Error(codes.Unavailable, "read stream ended without fin")
+			}
 			return products, nil
 		}
 		if err != nil {
 			return nil, err
+		}
+		if message.GetFin() {
+			fin = true
+			continue // the fin message carries no product
 		}
 		products = append(products, productFromProto(message.GetProduct()))
 	}

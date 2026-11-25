@@ -1,0 +1,13 @@
+# A Snapshot (proto/inventory/v1/sm.proto) in protobuf's text format: the
+# sample inventory. `make run` starts n1 from it (-snapshot); without
+# -snapshot a server starts with an empty inventory. The SKU of each product
+# is its map key (sm.Restore copies it into the product).
+# proto-file: inventory/v1/sm.proto
+# proto-message: inventory.v1.Snapshot
+state {
+  revision: 7
+  products { key: "apple"  value { name: "Apple"  price_cents: 50  stock: 10 version: 3 } }
+  products { key: "banana" value { name: "Banana" price_cents: 25  stock: 20 version: 5 } }
+  products { key: "cherry" value { name: "Cherry" price_cents: 400 stock: 0  version: 7 } }
+}
+applied: 0

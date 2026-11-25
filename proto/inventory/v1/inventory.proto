@@ -10,15 +10,19 @@
 //
 // Writes may carry the metadata `client-id` and `request-seq` (safe
 // retries); every reply carries `served-by: <node id>`.
+//
+// Part II: every server stream ends with a message whose fin = true (also
+// when it carries nothing else); a stream that ends without it was cut off.
+// The state machine's own messages are in sm.proto.
 syntax = "proto3";
 package inventory.v1;
 option go_package = "github.com/your-team/inventory/gen/inventory/v1;inventoryv1";
 
 service Inventory {
-  // One product, a list or a prefix; results stream back sorted.
-  // NOT_FOUND only when a single_sku_id was asked for and it is missing.
+  // One product, a list or a prefix; results stream back sorted, then a
+  // message with fin = true. NOT_FOUND only when a single_sku_id was asked
+  // for and it is missing.
   rpc ReadProducts(ReadProductsRequest) returns (stream ReadProductsResponse);
-  
   // ALREADY_EXISTS if the sku_id exists.
   rpc CreateProduct(CreateProductRequest) returns (CreateProductResponse);
   // NOT_FOUND if missing; ABORTED if expected_version differs.
@@ -68,6 +72,7 @@ message SortOrder {
 }
 message ReadProductsResponse {
   Product product = 1;          // one message per product, in sort order
+  bool fin = 2;                 // the last message; it carries no product
 }
 
 // ---- CreateProduct -----------------------------------------------------
